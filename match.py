@@ -4,7 +4,7 @@ def parse_args():
   import argparse
 
   argparser = argparse.ArgumentParser(description='Match price listings with products.')
-  argparser.add_argument('--products', '-p', metavar='<path>', required=True, nargs='+', help='product files')
+  argparser.add_argument('--product', '-p', metavar='<path>', required=True, help='product file')
   argparser.add_argument('listings', metavar='<listing file>', nargs='+', help='listing files')
   argparser.add_argument('--output', '-o', metavar='<path>', help='output file')
   return argparser.parse_args()
@@ -55,24 +55,24 @@ if __name__ == '__main__':
   import json
   import sys
 
-  if hasattr(args, 'output'):
+  if args.output is not None:
     sys.stdout = open(unicode(args.output), 'w')
 
   manuf_index = {} # token -> list of names
   model_index = {} # token -> list of names
   products = {} # name -> (manufacturer, family, model)
-  for p in fileinput.input(args.products):
-    p = json.loads(p)
-    pname = p['product_name']
-    manuf = tuple(tokenize(p['manufacturer']))
-    assert manuf
-    index(manuf, manuf_index, pname)
-    model = tuple(tokenize(p['model']))
-    assert model
-    index(model, model_index, pname)
-    family = tuple(tokenize(p.get('family', '')))
-    products[pname] = (compose_str(manuf), compose_str(family), compose_str(model))
-  fileinput.close()
+  with open(args.product) as f:
+    for p in f:
+      p = json.loads(p)
+      pname = p['product_name']
+      manuf = tuple(tokenize(p['manufacturer']))
+      assert manuf
+      index(manuf, manuf_index, pname)
+      model = tuple(tokenize(p['model']))
+      assert model
+      index(model, model_index, pname)
+      family = tuple(tokenize(p.get('family', '')))
+      products[pname] = (compose_str(manuf), compose_str(family), compose_str(model))
 
   matches = {}
   for l in fileinput.input(args.listings):
