@@ -53,6 +53,10 @@ if __name__ == '__main__':
 
   import fileinput
   import json
+  import sys
+
+  if hasattr(args, 'output'):
+    sys.stdout = open(unicode(args.output), 'w')
 
   manuf_index = {} # token -> list of names
   model_index = {} # token -> list of names
@@ -120,5 +124,9 @@ if __name__ == '__main__':
 
   for pname, l in matches.iteritems():
     print json.dumps({'product_name': pname, 'listings': l})
+
+  if hasattr(args, 'output'):
+    sys.stdout.close()
+    sys.stdout = sys.__stdout__
 
 
