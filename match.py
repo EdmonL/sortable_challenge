@@ -13,11 +13,21 @@ def parse_args():
 def make_tokenizer():
   import re
 
-  nonalphanum = re.compile(r'[\W_]+', re.UNICODE)
+  nonalphanum = re.compile(r'(([^\w.]|_)+)|([\W_][\W_]+)|(\s+[\W_]+)|([\W_]+)\s+', re.UNICODE)
+  decimal = re.compile(r'(\d+\.\d+)', re.UNICODE)
+  uselessdot1 = re.compile(r'(\d)\.([^\d])', re.UNICODE)
+  uselessdot2 = re.compile(r'([^\d])\.(\d)', re.UNICODE)
 
   def tokenize(s):
-    for t in re.sub(nonalphanum, ' ', s.lower()).split():
-      yield t
+    s = s.lower()
+    s = re.sub(nonalphanum, ' ', s)
+    s = re.sub(decimal, r' \1 ', s)
+    s = re.sub(uselessdot1, r'\1  \2', s)
+    s = re.sub(uselessdot2, r'\1  \2', s)
+    for t in s.split():
+      t = t.strip('.')
+      if t:
+        yield t
 
   return tokenize
 
@@ -25,54 +35,87 @@ def make_tokenizer():
 tokenize = make_tokenizer()
 
 
-def normalize_product(p):
-  pname = p['product_name']
-  required = set(tokenize(p['manufacturer'] + ' ' + p['model']))
-  optional = set(tokenize(p.get('family', ''))) - required # family is optional to mention
-  return (pname, required, optional)
+def compose_str(l):
+  return ' ' + ' '.join(t.strip() for t in l) + ' '
 
 
-def listing_description(l):
-  return set(tokenize(l['title'] + ' ' + l['manufacturer']))
+def index(l, index, name):
+  for t in l:
+    postings = index.get(t)
+    if postings == None:
+      index[t] = [pname]
+    else:
+      postings.append(pname)
 
 
 if __name__ == '__main__':
   args = parse_args()
 
   import fileinput
-  import itertools
   import json
 
-  index = {}
-  products = {}
-  for line in fileinput.input(args.products):
-    p = normalize_product(json.loads(line))
-    products[p[0]] = (p[1], p[2])
-    for t in itertools.chain(p[1], p[2]):
-      postings = index.get(t, [])
-      postings.append(p[0])
-      index[t] = postings
+  manuf_index = {} # token -> list of names
+  model_index = {} # token -> list of names
+  products = {} # name -> (manufacturer, family, model)
+  for p in fileinput.input(args.products):
+    p = json.loads(p)
+    pname = p['product_name']
+    manuf = tuple(tokenize(p['manufacturer']))
+    assert manuf
+    index(manuf, manuf_index, pname)
+    model = tuple(tokenize(p['model']))
+    assert model
+    index(model, model_index, pname)
+    family = tuple(tokenize(p.get('family', '')))
+    products[pname] = (compose_str(manuf), compose_str(family), compose_str(model))
   fileinput.close()
 
   matches = {}
-  for line in fileinput.input(args.listings):
-    listing = json.loads(line)
-    d = listing_description(listing)
-    candidates = {}
-    for t in d:
-      for pname in index.get(t, []):
-        candidates[pname] = candidates.get(pname, 0) + 1
-    for pname in candidates.keys():
+  for l in fileinput.input(args.listings):
+    l = json.loads(l)
+    manuf = tuple(tokenize(l['manufacturer']))
+    title = tuple(tokenize(l['title']))
+    if not manuf:
+      manuf = title
+    manuf_cands = set(p for t in manuf for p in manuf_index.get(t, ()))
+    manuf = compose_str(manuf)
+    for pname in tuple(manuf_cands):
+      if products[pname][0] not in manuf:
+        manuf_cands.remove(pname)
+    if not manuf_cands:
+      continue
+    model_cands = set(p for t in title for p in model_index.get(t, ()) if p in manuf_cands)
+    del manuf_cands
+    title = compose_str(title)
+    for pname in tuple(model_cands):
       p = products[pname]
-      l = candidates[pname]
-      if l == len(p[0]) + len(p[1]) or l == len(p[0]) and p[0].issubset(d):
-        continue
-      del candidates[pname]
-    if len(candidates) == 1:
-      pname = candidates.iterkeys().next()
-      l = matches.get(pname, [])
-      l.append(listing)
-      matches[pname] = l
+      if p[2] not in title or p[1] and p[1] not in title:
+        model_cands.remove(pname)
+    if not model_cands:
+      continue
+    cands = {}
+    maxlen = 0
+    for pname in model_cands:
+      p = products[pname]
+      s = compose_str(p)
+      if maxlen < len(s):
+        maxlen = len(s)
+        maxp = p
+      cands[pname] = (p, s)
+    del model_cands
+    for pname in cands.keys():
+      p, s = cands[pname]
+      if len(s) < maxlen and p[0] in maxp[0] and p[1] in maxp[1] and p[2] in maxp[2]:
+        del cands[pname]
+    cands = cands.keys()
+
+    if len(cands) == 1:
+      pname = cands[0]
+      listings = matches.get(pname)
+      if listings == None:
+        matches[pname] = [l]
+      else:
+        listings.append(l)
   fileinput.close()
 
   for pname, l in matches.iteritems():
