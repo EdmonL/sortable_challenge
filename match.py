@@ -93,7 +93,7 @@ if __name__ == '__main__':
     title = compose_str(title)
     for pname in tuple(model_cands):
       p = products[pname]
-      if p[2] not in title or p[1] and p[1] not in title:
+      if p[2] not in title or p[1].strip() and p[1] not in title:
         model_cands.remove(pname)
     if not model_cands:
       continue
